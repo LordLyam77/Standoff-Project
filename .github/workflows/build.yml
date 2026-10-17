@@ -16,9 +16,9 @@ on:
         required: false
         default: 'shell'
       target:
-        description: 'Framework to shell (mode=shell). Default: auto (picks least-referenced framework)'
+        description: 'Framework to shell (mode=shell). Default: AppMetricaLog'
         required: false
-        default: 'auto'
+        default: 'AppMetricaLog'
 
 permissions:
   contents: read
@@ -30,6 +30,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app || true
+          echo "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer" >> $GITHUB_ENV
+          xcrun --sdk iphoneos --show-sdk-path || true
+
       - name: Build insert_dylib
         if: ${{ github.event.inputs.mode == 'inject' }}
         run: |
@@ -40,7 +46,7 @@ jobs:
 
       - name: Build dylib
         if: ${{ github.event.inputs.mode == 'inject' }}
-        run: bash build.sh
+        run: bash -x build.sh
 
       - name: Obtain IPA
         id: ipa
@@ -75,7 +81,7 @@ jobs:
         if: ${{ github.event.inputs.mode != 'inject' }}
         run: |
           mkdir -p output
-          bash shellswap.sh "${{ steps.ipa.outputs.ipa_file }}" "${{ github.event.inputs.target || 'AppMetricaLog' }}" "output/Standoff2-cheat.ipa"
+          bash -x shellswap.sh "${{ steps.ipa.outputs.ipa_file }}" "${{ github.event.inputs.target || 'AppMetricaLog' }}" "output/Standoff2-cheat.ipa"
         env:
           CODE_SIGN_IDENTITY: "${{ github.event.inputs.sign }}"
 
@@ -83,7 +89,7 @@ jobs:
         if: ${{ github.event.inputs.mode == 'inject' }}
         run: |
           mkdir -p output
-          bash inject.sh "${{ steps.ipa.outputs.ipa_file }}" "output/Standoff2-cheat.ipa"
+          bash -x inject.sh "${{ steps.ipa.outputs.ipa_file }}" "output/Standoff2-cheat.ipa"
         env:
           CODE_SIGN_IDENTITY: "${{ github.event.inputs.sign }}"
 

@@ -5,8 +5,20 @@
 set -e
 
 OUT="libgamedata.dylib"
-SDK="${SDK:-$(xcrun --sdk iphoneos --show-sdk-path)}"
-CLANG="$(xcrun --find clang)"
+if [ -z "$SDK" ]; then
+    SDK="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)"
+fi
+if [ -z "$SDK" ]; then
+    SDK="$(find /Applications/Xcode*.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk -maxdepth 0 2>/dev/null | sort -V | tail -1 || true)"
+fi
+[ -n "$SDK" ] || { echo "ERROR: iOS SDK not found" >&2; exit 1; }
+
+if [ -z "$CLANG" ]; then
+    CLANG="$(xcrun --find clang 2>/dev/null || true)"
+fi
+if [ -z "$CLANG" ]; then
+    CLANG="$(find /Applications/Xcode*.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -maxdepth 0 2>/dev/null | tail -1 || echo "clang")"
+fi
 ARCH="${ARCH:-arm64}"
 MIN_IOS="${MIN_IOS:-12.0}"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"

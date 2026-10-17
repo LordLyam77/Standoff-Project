@@ -36,7 +36,7 @@ command -v nm >/dev/null 2>&1 || { echo "ERROR: nm not found" >&2; exit 1; }
 command -v codesign >/dev/null 2>&1 || { echo "ERROR: codesign not found" >&2; exit 1; }
 
 echo "==> Extracting IPA"
-unzip -q "$IPA" -d "$WORK/app"
+unzip -q "$IPA" -d "$WORK/app" || [ $? -le 1 ]
 APP_DIR="$(find "$WORK/app" -maxdepth 2 -name '*.app' -type d | head -1)"
 [ -n "$APP_DIR" ] || { echo "ERROR: no .app found in IPA" >&2; exit 1; }
 
@@ -71,9 +71,12 @@ if [ "$TARGET" = "auto" ]; then
         # not loaded by UnityFramework? skip (cheat would never load)
         grep -q "UnityFramework:$fwname" "$EDGES" || continue
         # how many other modules reference it?
-        refs=$(grep -c ":$fwname$" "$EDGES" 2>/dev/null || echo 0)
+        refs=$(grep -c ":$fwname$" "$EDGES" 2>/dev/null || true)
+        refs=$(echo "$refs" | tr -cd '0-9')
+        [ -n "$refs" ] || refs=0
         # exported symbol count
-        nsyms=$(nm $NM_ARGS -gU "$bin" 2>/dev/null | wc -l | tr -d ' ')
+        nsyms=$(nm $NM_ARGS -gU "$bin" 2>/dev/null | wc -l | tr -cd '0-9')
+        [ -n "$nsyms" ] || nsyms=0
         # score: prefer 0 other refs, then fewer symbols
         score="$refs-$nsyms"
         if [ -z "$BEST_SCORE" ] || [ "$refs" -lt "${BEST_SCORE%%-*}" ] || \
@@ -101,7 +104,7 @@ ORIG_ID="$(otool -D "$FW_BIN" 2>/dev/null | tail -1)"
 echo "    Original dylib ID: $ORIG_ID"
 
 echo "==> Harvesting exported symbols"
-nm $NM_ARGS -gU "$FW_BIN" 2>/dev/null | awk '{$1="";print}' | tr -d ' ' \
+nm $NM_ARGS -gU "$FW_BIN" 2>/dev/null | awk '{print $NF}' \
   | grep '^_' | sort -u > "$WORK/orig_syms.txt"
 echo "    $(wc -l < "$WORK/orig_syms.txt") exported symbols"
 
@@ -144,8 +147,21 @@ done
 echo "    $(grep -c '@interface' "$GEN") ObjC class stubs, $(grep -c 'void\* .*()' "$GEN") C stubs"
 
 echo "==> Building shell dylib"
-SDK="${SDK:-$(xcrun --sdk iphoneos --show-sdk-path)}"
-CLANG="$(xcrun --find clang)"
+if [ -z "$SDK" ]; then
+    SDK="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)"
+fi
+if [ -z "$SDK" ]; then
+    SDK="$(find /Applications/Xcode*.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk -maxdepth 0 2>/dev/null | sort -V | tail -1 || true)"
+fi
+[ -n "$SDK" ] || { echo "ERROR: iOS SDK not found" >&2; exit 1; }
+echo "    Using iOS SDK: $SDK"
+
+if [ -z "$CLANG" ]; then
+    CLANG="$(xcrun --find clang 2>/dev/null || true)"
+fi
+if [ -z "$CLANG" ]; then
+    CLANG="$(find /Applications/Xcode*.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -maxdepth 0 2>/dev/null | tail -1 || echo "clang")"
+fi
 ARCH="${ARCH:-arm64}"
 MIN_IOS="${MIN_IOS:-12.0}"
 INCDIR="$SRC_DIR/include"
@@ -184,7 +200,7 @@ $CLANG -x objective-c++ \
 echo "    Shell size: $(stat -f%z "$WORK/$TARGET") bytes"
 
 echo "==> Verifying symbol coverage vs original"
-nm $NM_ARGS -gU "$WORK/$TARGET" 2>/dev/null | awk '{$1="";print}' | tr -d ' ' | grep '^_' | sort -u > "$WORK/new_syms.txt"
+nm $NM_ARGS -gU "$WORK/$TARGET" 2>/dev/null | awk '{print $NF}' | grep '^_' | sort -u > "$WORK/new_syms.txt"
 MISSING="$(comm -23 "$WORK/orig_syms.txt" "$WORK/new_syms.txt" | grep -v '_OBJC_IVAR_' || true)"
 if [ -n "$MISSING" ]; then
     echo "    WARNING: $(echo "$MISSING" | wc -l | tr -d ' ') original exports not reproduced:"
