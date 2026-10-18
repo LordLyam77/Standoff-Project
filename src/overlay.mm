@@ -48,6 +48,13 @@ static ESP* g_espPtr = nullptr;
 
 @end
 
+@interface ESPOverlayViewController : UIViewController
+@end
+
+@implementation ESPOverlayViewController
+- (BOOL)_canShowWhileLocked { return YES; }
+@end
+
 void SetupOverlayWindow() {
     if (g_overlayWindow) return;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -58,11 +65,25 @@ void SetupOverlayWindow() {
         g_overlayWindow.windowLevel = UIWindowLevelStatusBar + 100;
         g_overlayWindow.userInteractionEnabled = NO;
         g_overlayWindow.backgroundColor = [UIColor clearColor];
-        g_overlayWindow.hidden = NO;
+
+        ESPOverlayViewController* rootVC = [[ESPOverlayViewController alloc] init];
+        rootVC.view.backgroundColor = [UIColor clearColor];
+        rootVC.view.userInteractionEnabled = NO;
 
         g_overlayView = [[ESPOverlayView alloc] initWithFrame:bounds];
         g_overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [g_overlayWindow addSubview:g_overlayView];
+        [rootVC.view addSubview:g_overlayView];
+
+        g_overlayWindow.rootViewController = rootVC;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    g_overlayWindow.windowScene = (UIWindowScene*)scene;
+                    break;
+                }
+            }
+        }
+        g_overlayWindow.hidden = NO;
 
         g_espPtr = (ESP*)GetESP();
 

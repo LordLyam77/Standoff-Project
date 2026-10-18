@@ -306,6 +306,14 @@ void SetupMenuWindow() {
         g_menuWindow.backgroundColor = [UIColor clearColor];
         g_menuController = [[CheatMenuController alloc] init];
         g_menuWindow.rootViewController = g_menuController;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    g_menuWindow.windowScene = (UIWindowScene*)scene;
+                    break;
+                }
+            }
+        }
         g_menuWindow.hidden = NO;
     });
 }

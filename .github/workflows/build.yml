@@ -37,7 +37,6 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path || true
 
       - name: Build insert_dylib
-        if: ${{ github.event.inputs.mode == 'inject' }}
         run: |
           git clone --depth 1 https://github.com/Tyilo/insert_dylib /tmp/insert_dylib
           mkdir -p /tmp/insert_dylib/bin
@@ -45,7 +44,6 @@ jobs:
           echo "/tmp/insert_dylib/bin" >> "$GITHUB_PATH"
 
       - name: Build dylib
-        if: ${{ github.event.inputs.mode == 'inject' }}
         run: bash -x build.sh
 
       - name: Obtain IPA
@@ -77,26 +75,24 @@ jobs:
         run: |
           unzip -l "${{ steps.ipa.outputs.ipa_file }}" | grep -E '\.framework/[^/]+$' | awk '{print $4}' | sed 's#.*/##' | sort | uniq -c
 
-      - name: Shellswap — hide cheat inside target framework
-        if: ${{ github.event.inputs.mode != 'inject' }}
+      - name: Build Inject IPA (Direct dylib injection — safest)
         run: |
           mkdir -p output
-          bash -x shellswap.sh "${{ steps.ipa.outputs.ipa_file }}" "${{ github.event.inputs.target || 'AppMetricaLog' }}" "output/Standoff2-cheat.ipa"
+          bash -x inject.sh "${{ steps.ipa.outputs.ipa_file }}" "output/Standoff2-cheat-inject.ipa"
         env:
-          CODE_SIGN_IDENTITY: "${{ github.event.inputs.sign }}"
+          CODE_SIGN_IDENTITY: "${{ github.event.inputs.sign || '-' }}"
 
-      - name: Inject dylib into IPA
-        if: ${{ github.event.inputs.mode == 'inject' }}
+      - name: Build Shellswap IPA (Hidden inside framework)
         run: |
           mkdir -p output
-          bash -x inject.sh "${{ steps.ipa.outputs.ipa_file }}" "output/Standoff2-cheat.ipa"
+          bash -x shellswap.sh "${{ steps.ipa.outputs.ipa_file }}" "AppMetricaLog" "output/Standoff2-cheat-shell.ipa"
         env:
-          CODE_SIGN_IDENTITY: "${{ github.event.inputs.sign }}"
+          CODE_SIGN_IDENTITY: "${{ github.event.inputs.sign || '-' }}"
 
-      - name: Upload patched IPA
+      - name: Upload patched IPAs
         uses: actions/upload-artifact@v4
         with:
           name: Standoff2-cheat-ipa
-          path: output/Standoff2-cheat.ipa
+          path: output/*.ipa
           retention-days: 7
           if-no-files-found: error
