@@ -59,14 +59,6 @@ static void CrashHandler(int sig, siginfo_t* info, void* uctx) {
 }
 
 void CHEAT_INSTALL_CRASH_HANDLERS(void) {
-    static struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = CrashHandler;
-    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGABRT, &sa, NULL);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGTRAP, &sa, NULL);
+    // Disabled: Unity IL2CPP internally traps SIGSEGV for NullReferenceException handling.
+    // Intercepting SIGSEGV causes Unity to terminate on normal startup null checks.
 }

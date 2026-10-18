@@ -46,13 +46,9 @@ if [ ! -f "$MAIN_BIN" ]; then
     MAIN_BIN="$APP_DIR/$(ls -1 "$APP_DIR" | grep -v '\.' | head -1)"
 fi
 
-if [ -f "$FW_BIN" ]; then
-    echo "==> Injecting load command into $FW_BIN"
-    insert_dylib "@executable_path/Frameworks/libgamedata.dylib" "$FW_BIN" --inplace --all-yes
-else
-    echo "==> UnityFramework not found, injecting into $MAIN_BIN"
-    insert_dylib "@executable_path/Frameworks/libgamedata.dylib" "$MAIN_BIN" --inplace --all-yes
-fi
+echo "==> Injecting load command into main executable: $MAIN_BIN"
+insert_dylib "@executable_path/Frameworks/libgamedata.dylib" "$MAIN_BIN" --inplace --all-yes
+
 
 echo "==> Removing FairPlay DRM and embedded provisioning"
 rm -rf "$APP_DIR/SC_Info" 2>/dev/null || true
