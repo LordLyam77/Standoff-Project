@@ -76,8 +76,8 @@ find "$FRAMEWORKS" -name '*.framework' -maxdepth 1 -type d | while read -r fw; d
 done
 
 codesign --force --sign - "$MAIN_BIN" 2>/dev/null || true
-codesign --force --sign - --deep --preserve-metadata=entitlements,identifier,flags "$APP_DIR" 2>/dev/null || \
 codesign --force --sign - --deep "$APP_DIR" 2>/dev/null || true
+
 
 echo "==> Repackaging IPA"
 ( cd "$WORK/app" && zip -qy -r "$OUT_IPA" Payload ) 2>/dev/null || \

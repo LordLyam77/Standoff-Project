@@ -27,50 +27,8 @@ CheatConfig g_config;
 static bool g_hooked = false;
 static void* g_fwHandle = NULL;
 
-#pragma mark - Process guard & Bundle Spoof
-
-static NSString* (*orig_bundleIdentifier)(id, SEL) = NULL;
-
-static NSString* HookedBundleIdentifier(id self, SEL _cmd) {
-    if (self == [NSBundle mainBundle]) {
-        return @"com.axlebolt.standoff2";
-    }
-    if (orig_bundleIdentifier) {
-        return orig_bundleIdentifier(self, _cmd);
-    }
-    return @"com.axlebolt.standoff2";
-}
-
-static void SwizzleBundleIdentifier() {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        Method m = class_getInstanceMethod([NSBundle class], @selector(bundleIdentifier));
-        if (m) {
-            orig_bundleIdentifier = (NSString* (*)(id, SEL))method_getImplementation(m);
-            method_setImplementation(m, (IMP)HookedBundleIdentifier);
-        }
-    });
-}
-
-static BOOL IsRunningInStandoff() {
-    SwizzleBundleIdentifier();
-    return YES;
-}
-
 #pragma mark - IL2CPP bootstrap
 
-static void* LoadIL2CppFunctions() {
-    NSString* fwPath = [[NSBundle mainBundle] pathForResource:@"UnityFramework" ofType:@"framework"];
-    if (fwPath) {
-        NSString* binPath = [fwPath stringByAppendingPathComponent:@"UnityFramework"];
-        void* h = dlopen(binPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
-        if (h) return h;
-    }
-    void* handle = dlopen("@executable_path/Frameworks/UnityFramework.framework/UnityFramework", RTLD_NOW | RTLD_GLOBAL);
-    if (!handle) handle = dlopen("UnityFramework", RTLD_NOW | RTLD_GLOBAL);
-    if (!handle) handle = dlopen(NULL, RTLD_LAZY);
-    return handle;
-}
 
 static bool BindIL2CppFunctions(void* handle) {
     auto bind = [](void* h, const char* name) {
@@ -308,13 +266,14 @@ static void* cheatWorker(void* arg) {
         CHEAT_LOG("w: worker start");
 
         int attempts = 0;
-        while (attempts < 900) {
-            if (!g_fwHandle) g_fwHandle = LoadIL2CppFunctions();
-            if (g_fwHandle && BindIL2CppFunctions(g_fwHandle)) break;
+        while (attempts < 600) {
+            if (dlsym(RTLD_DEFAULT, "il2cpp_domain_get")) {
+                if (BindIL2CppFunctions(RTLD_DEFAULT)) break;
+            }
             attempts++;
             usleep(100 * 1000);
         }
-        if (!g_fwHandle || !il2cpp_domain_get) { CHEAT_LOG("w: gave up binding"); return NULL; }
+        if (!il2cpp_domain_get) { CHEAT_LOG("w: gave up binding"); return NULL; }
 
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -353,14 +312,9 @@ static void* cheatWorker(void* arg) {
 static void ScheduleUI() {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            @autoreleasepool {
-                [[NSUserDefaults standardUserDefaults] setObject:@"true" forKey:@"anticheat.disable.banme"];
-                [[NSUserDefaults standardUserDefaults] setObject:@"true" forKey:@"anticheat.disable.checkpermission"];
-                [[NSUserDefaults standardUserDefaults] synchronize];
-            }
-            CHEAT_LOG("m: AC flags written, creating UI");
+            CHEAT_LOG("m: Creating cheat UI");
             ShowMenu();
             SetupOverlayWindow();
             CHEAT_LOG("m: UI created");
@@ -372,25 +326,9 @@ static void ScheduleUI() {
 
 __attribute__((constructor))
 static void StandoffCheatInit() {
-    if (!IsRunningInStandoff()) return;
-
-    CHEAT_LOG_OPEN();
-    CHEAT_INSTALL_CRASH_HANDLERS();
-    CHEAT_LOG("init: start");
+    CHEAT_LOG("init: StandoffCheat dylib loaded");
 
     pthread_t thread;
     pthread_create(&thread, NULL, cheatWorker, NULL);
     ScheduleUI();
 }
-
-@interface StandoffCheatLoader : NSObject
-@end
-
-@implementation StandoffCheatLoader
-
-+ (void)load {
-    if (!IsRunningInStandoff()) return;
-    CHEAT_LOG("init: loader attached");
-}
-
-@end

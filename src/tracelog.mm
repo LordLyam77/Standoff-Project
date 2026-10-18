@@ -10,34 +10,39 @@ static FILE* g_traceFile = NULL;
 
 static void OpenLog(void) {
     if (g_traceFile) return;
-    NSString* dir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    if (!dir) dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString* path = [dir stringByAppendingPathComponent:@"apptrace.log"];
-    NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
-    if (attrs && [attrs[NSFileSize] longLongValue] > 1024 * 1024) {
-        NSString* old = [dir stringByAppendingPathComponent:@"apptrace.log.old"];
-        [[NSFileManager defaultManager] removeItemAtPath:old error:nil];
-        [[NSFileManager defaultManager] moveItemAtPath:path toPath:old error:nil];
-    }
-    g_traceFile = fopen([path UTF8String], "a");
-    if (g_traceFile) setvbuf(g_traceFile, NULL, _IONBF, 0);
+    @try {
+        NSArray* paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString* dir = paths.count > 0 ? paths[0] : nil;
+        if (!dir) dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+        if (!dir) return;
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString* path = [dir stringByAppendingPathComponent:@"apptrace.log"];
+        const char* cpath = [path UTF8String];
+        if (cpath) {
+            g_traceFile = fopen(cpath, "a");
+            if (g_traceFile) setvbuf(g_traceFile, NULL, _IONBF, 0);
+        }
+    } @catch (id ex) {}
 }
 
 void CHEAT_LOG_OPEN(void) { OpenLog(); }
 
 void CHEAT_LOG(const char* fmt, ...) {
-    if (!g_traceFile) OpenLog();
-    if (!g_traceFile) return;
     va_list ap;
     va_start(ap, fmt);
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    fprintf(g_traceFile, "[%ld.%03d] ", (long)tv.tv_sec, tv.tv_usec / 1000);
-    vfprintf(g_traceFile, fmt, ap);
-    fprintf(g_traceFile, "\n");
-    fflush(g_traceFile);
+    char buf[1024];
+    vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
+
+    NSLog(@"[StandoffCheat] %s", buf);
+
+    if (!g_traceFile) OpenLog();
+    if (g_traceFile) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        fprintf(g_traceFile, "[%ld.%03d] %s\n", (long)tv.tv_sec, (int)(tv.tv_usec / 1000), buf);
+        fflush(g_traceFile);
+    }
 }
 
 static void CrashHandler(int sig, siginfo_t* info, void* uctx) {

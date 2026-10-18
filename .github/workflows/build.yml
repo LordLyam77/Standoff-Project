@@ -91,12 +91,26 @@ jobs:
         env:
           CODE_SIGN_IDENTITY: "${{ github.event.inputs.sign || '-' }}"
 
-      - name: Upload patched IPAs and dylib
+      - name: Upload standalone dylib (lightweight)
         uses: actions/upload-artifact@v4
         with:
-          name: Standoff2-cheat-build
-          path: |
-            output/*.ipa
-            build/libgamedata.dylib
+          name: libgamedata-dylib
+          path: build/libgamedata.dylib
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Inject IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Standoff2-cheat-inject-ipa
+          path: output/Standoff2-cheat-inject.ipa
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Shellswap IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Standoff2-cheat-shell-ipa
+          path: output/Standoff2-cheat-shell.ipa
           retention-days: 7
           if-no-files-found: error
