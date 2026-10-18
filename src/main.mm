@@ -93,21 +93,10 @@ static bool BindIL2CppFunctions(void* handle) {
     return true;
 }
 
-#pragma mark - Surgical anti-cheat neutralization
+#pragma mark - Surgical anti-cheat neutralization (Jailed-safe method pointer redirection)
 
-static void PatchReturnZero(void* addr) {
-    if (!addr) return;
-    uintptr_t page = (uintptr_t)addr & ~(uintptr_t)0x3FFF;
-    size_t len = 0x4000;
-    if (mprotect((void*)page, len, PROT_READ | PROT_WRITE) != 0) {
-        CHEAT_LOG("ac: mprotect RW fail %p", addr);
-        return;
-    }
-    const uint32_t insn[2] = { 0xD2800000, 0xD65F03C0 }; // MOV X0,#0; RET
-    memcpy(addr, insn, 8);
-    sys_icache_invalidate(addr, 8);
-    mprotect((void*)page, len, PROT_READ | PROT_EXEC);
-    CHEAT_LOG("ac: patched %p", addr);
+static uint64_t SafeRetZeroStub(void* self, void* method) {
+    return 0;
 }
 
 static void* g_patchedAddrs[512];
@@ -117,6 +106,15 @@ static bool AlreadyPatched(void* addr) {
     for (int i = 0; i < g_patchedCount; i++)
         if (g_patchedAddrs[i] == addr) return true;
     return false;
+}
+
+static void PatchReturnZero(const Il2CppMethodInfo* m) {
+    if (!m) return;
+    // On jailed iOS, NEVER call mprotect or modify __TEXT code pages.
+    // Instead, safely redirect IL2CPP's MethodInfo->methodPointer in writable metadata:
+    void** slot = (void**)m;
+    slot[0] = (void*)&SafeRetZeroStub;
+    CHEAT_LOG("ac: redirected method %p to SafeRetZeroStub", m);
 }
 
 static const char* g_skipPrefixes[] = {
@@ -145,10 +143,9 @@ static void NukeACClass(const Il2CppClass* klass, const char* name) {
             strstr(mn, "Is") || strstr(mn, "Has") || strstr(mn, "Verify") ||
             strstr(mn, "Verdict") || strstr(mn, "Report") || strstr(mn, "Collect") ||
             strstr(mn, "Update") || strstr(mn, "Run") || strstr(mn, "Execute");
-        void* target = (void*)((const void**)m)[0];
-        if (detection && target && !AlreadyPatched(target)) {
-            PatchReturnZero(target);
-            if (g_patchedCount < 512) g_patchedAddrs[g_patchedCount++] = target;
+        if (detection && !AlreadyPatched((void*)m)) {
+            PatchReturnZero(m);
+            if (g_patchedCount < 512) g_patchedAddrs[g_patchedCount++] = (void*)m;
             patched++;
             CHEAT_LOG("ac:  patch %s::%s", name, mn);
         } else {
@@ -281,15 +278,9 @@ static void* cheatWorker(void* arg) {
         double bootStart = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 
         int idle = 0;
-        bool acAttempted = false;
         while (idle < 400) {
             usleep(200 * 1000);
             idle++;
-            if (!acAttempted && il2cpp_domain_get && il2cpp_domain_get()) {
-                acAttempted = true;
-                CHEAT_LOG("w: attempting early AC sweep");
-                NukeAntiCheat();
-            }
             clock_gettime(CLOCK_MONOTONIC, &ts);
             double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
             if (now - bootStart < 8.0) continue;
