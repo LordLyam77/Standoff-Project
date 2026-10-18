@@ -1,5 +1,6 @@
 #import "menu.h"
 #import "cheat_data.h"
+#import "tracelog.h"
 
 UIWindow* g_menuWindow = nil;
 CheatMenuController* g_menuController = nil;
@@ -18,6 +19,22 @@ static const CGFloat kPanelW = 400;
 @end
 
 @implementation CheatMenuController
+
+- (BOOL)prefersStatusBarHidden {
+    return YES;
+}
+
+- (BOOL)shouldAutorotate {
+    return YES;
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return UIInterfaceOrientationMaskLandscape;
+}
+
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation {
+    return UIInterfaceOrientationLandscapeRight;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -299,22 +316,31 @@ void SetupMenuWindow() {
     if (g_menuWindow) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_menuWindow) return;
-        CGRect screen = [UIScreen mainScreen].bounds;
-        g_menuWindow = [[UIWindow alloc] initWithFrame:CGRectMake(screen.size.width - kBarW - 14, 110, kBarW, kBarH)];
-        g_menuWindow.windowLevel = UIWindowLevelStatusBar + 50;
-        g_menuWindow.userInteractionEnabled = YES;
-        g_menuWindow.backgroundColor = [UIColor clearColor];
-        g_menuController = [[CheatMenuController alloc] init];
-        g_menuWindow.rootViewController = g_menuController;
-        if (@available(iOS 13.0, *)) {
-            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
-                if ([scene isKindOfClass:[UIWindowScene class]]) {
-                    g_menuWindow.windowScene = (UIWindowScene*)scene;
-                    break;
+        @try {
+            CGRect screen = [UIScreen mainScreen].bounds;
+            g_menuWindow = [[UIWindow alloc] initWithFrame:CGRectMake(screen.size.width - kBarW - 14, 110, kBarW, kBarH)];
+            g_menuWindow.windowLevel = UIWindowLevelStatusBar + 50;
+            g_menuWindow.userInteractionEnabled = YES;
+            g_menuWindow.backgroundColor = [UIColor clearColor];
+            g_menuController = [[CheatMenuController alloc] init];
+            g_menuWindow.rootViewController = g_menuController;
+            if (@available(iOS 13.0, *)) {
+                UIWindow* keyWin = [UIApplication sharedApplication].keyWindow;
+                if (keyWin && keyWin.windowScene) {
+                    g_menuWindow.windowScene = keyWin.windowScene;
+                } else {
+                    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+                        if ([scene isKindOfClass:[UIWindowScene class]]) {
+                            g_menuWindow.windowScene = (UIWindowScene*)scene;
+                            break;
+                        }
+                    }
                 }
             }
+            g_menuWindow.hidden = NO;
+        } @catch (NSException* e) {
+            CHEAT_LOG("m: SetupMenuWindow exception: %s", e.reason ? e.reason.UTF8String : "unknown");
         }
-        g_menuWindow.hidden = NO;
     });
 }
 

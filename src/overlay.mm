@@ -53,41 +53,65 @@ static ESP* g_espPtr = nullptr;
 
 @implementation ESPOverlayViewController
 - (BOOL)_canShowWhileLocked { return YES; }
+
+- (BOOL)prefersStatusBarHidden {
+    return YES;
+}
+
+- (BOOL)shouldAutorotate {
+    return YES;
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return UIInterfaceOrientationMaskLandscape;
+}
+
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation {
+    return UIInterfaceOrientationLandscapeRight;
+}
 @end
 
 void SetupOverlayWindow() {
     if (g_overlayWindow) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_overlayWindow) return;
+        @try {
+            CGRect bounds = [UIScreen mainScreen].bounds;
+            g_overlayWindow = [[UIWindow alloc] initWithFrame:bounds];
+            g_overlayWindow.windowLevel = UIWindowLevelStatusBar + 100;
+            g_overlayWindow.userInteractionEnabled = NO;
+            g_overlayWindow.backgroundColor = [UIColor clearColor];
 
-        CGRect bounds = [UIScreen mainScreen].bounds;
-        g_overlayWindow = [[UIWindow alloc] initWithFrame:bounds];
-        g_overlayWindow.windowLevel = UIWindowLevelStatusBar + 100;
-        g_overlayWindow.userInteractionEnabled = NO;
-        g_overlayWindow.backgroundColor = [UIColor clearColor];
+            ESPOverlayViewController* rootVC = [[ESPOverlayViewController alloc] init];
+            rootVC.view.backgroundColor = [UIColor clearColor];
+            rootVC.view.userInteractionEnabled = NO;
 
-        ESPOverlayViewController* rootVC = [[ESPOverlayViewController alloc] init];
-        rootVC.view.backgroundColor = [UIColor clearColor];
-        rootVC.view.userInteractionEnabled = NO;
+            g_overlayView = [[ESPOverlayView alloc] initWithFrame:bounds];
+            g_overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            [rootVC.view addSubview:g_overlayView];
 
-        g_overlayView = [[ESPOverlayView alloc] initWithFrame:bounds];
-        g_overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [rootVC.view addSubview:g_overlayView];
-
-        g_overlayWindow.rootViewController = rootVC;
-        if (@available(iOS 13.0, *)) {
-            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
-                if ([scene isKindOfClass:[UIWindowScene class]]) {
-                    g_overlayWindow.windowScene = (UIWindowScene*)scene;
-                    break;
+            g_overlayWindow.rootViewController = rootVC;
+            if (@available(iOS 13.0, *)) {
+                UIWindow* keyWin = [UIApplication sharedApplication].keyWindow;
+                if (keyWin && keyWin.windowScene) {
+                    g_overlayWindow.windowScene = keyWin.windowScene;
+                } else {
+                    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+                        if ([scene isKindOfClass:[UIWindowScene class]]) {
+                            g_overlayWindow.windowScene = (UIWindowScene*)scene;
+                            break;
+                        }
+                    }
                 }
             }
+            g_overlayWindow.hidden = NO;
+
+            g_espPtr = (ESP*)GetESP();
+
+            g_displayLink = [CADisplayLink displayLinkWithTarget:g_overlayView selector:@selector(displayLinkTick:)];
+            [g_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+        } @catch (NSException* e) {
+            CHEAT_LOG("m: SetupOverlayWindow exception: %s", e.reason ? e.reason.UTF8String : "unknown");
         }
-        g_overlayWindow.hidden = NO;
-
-        g_espPtr = (ESP*)GetESP();
-
-        g_displayLink = [CADisplayLink displayLinkWithTarget:g_overlayView selector:@selector(displayLinkTick:)];
-        [g_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
     });
 }

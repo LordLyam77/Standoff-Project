@@ -353,7 +353,7 @@ static void* cheatWorker(void* arg) {
 static void ScheduleUI() {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @autoreleasepool {
                 [[NSUserDefaults standardUserDefaults] setObject:@"true" forKey:@"anticheat.disable.banme"];
