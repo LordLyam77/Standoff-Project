@@ -45,7 +45,8 @@ $CLANG -x objective-c++ \
   -I"$INCDIR" \
   -I"$SRCDIR" \
   -dynamiclib \
-  -undefined dynamic_lookup \
+  -stdlib=libc++ \
+  -lc++ \
   -install_name "@executable_path/Frameworks/$OUT" \
   -framework UIKit \
   -framework Foundation \

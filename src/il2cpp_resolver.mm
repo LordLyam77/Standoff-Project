@@ -43,7 +43,10 @@ extern "C" {
     DEFINE_FPTR(Il2CppClass*, il2cpp_array_class_get, (const Il2CppClass*, uint32_t));
     DEFINE_FPTR(void*, il2cpp_array_get, (const Il2CppArray*, uintptr_t));
     DEFINE_FPTR(uintptr_t, il2cpp_array_length, (const Il2CppArray*));
+    DEFINE_FPTR(const Il2CppMethodInfo*, il2cpp_class_get_methods, (const Il2CppClass*, Il2CppIterator*));
+    DEFINE_FPTR(int, il2cpp_class_get_method_count, (const Il2CppClass*));
 }
+
 
 extern IL2CPPResolver* g_resolver;
 
