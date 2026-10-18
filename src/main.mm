@@ -27,14 +27,34 @@ CheatConfig g_config;
 static bool g_hooked = false;
 static void* g_fwHandle = NULL;
 
-#pragma mark - Process guard
+#pragma mark - Process guard & Bundle Spoof
+
+static NSString* (*orig_bundleIdentifier)(id, SEL) = NULL;
+
+static NSString* HookedBundleIdentifier(id self, SEL _cmd) {
+    if (self == [NSBundle mainBundle]) {
+        return @"com.axlebolt.standoff2";
+    }
+    if (orig_bundleIdentifier) {
+        return orig_bundleIdentifier(self, _cmd);
+    }
+    return @"com.axlebolt.standoff2";
+}
+
+static void SwizzleBundleIdentifier() {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        Method m = class_getInstanceMethod([NSBundle class], @selector(bundleIdentifier));
+        if (m) {
+            orig_bundleIdentifier = (NSString* (*)(id, SEL))method_getImplementation(m);
+            method_setImplementation(m, (IMP)HookedBundleIdentifier);
+        }
+    });
+}
 
 static BOOL IsRunningInStandoff() {
-    NSString* bundleId = [[NSBundle mainBundle] bundleIdentifier];
-    return [bundleId isEqualToString:@"com.axlebolt.standoff2"] ||
-           [[NSProcessInfo processInfo].processName isEqualToString:@"Standoff2"] ||
-           [[NSProcessInfo processInfo].processName isEqualToString:@"UnityFramework"] ||
-           [bundleId hasPrefix:@"com.axlebolt"];
+    SwizzleBundleIdentifier();
+    return YES;
 }
 
 #pragma mark - IL2CPP bootstrap
