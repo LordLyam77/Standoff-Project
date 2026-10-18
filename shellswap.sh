@@ -36,7 +36,7 @@ command -v nm >/dev/null 2>&1 || { echo "ERROR: nm not found" >&2; exit 1; }
 command -v codesign >/dev/null 2>&1 || { echo "ERROR: codesign not found" >&2; exit 1; }
 
 echo "==> Extracting IPA"
-unzip -q "$IPA" -d "$WORK/app" || [ $? -le 1 ]
+unzip -q "$IPA" -d "$WORK/app" || true
 APP_DIR="$(find "$WORK/app" -maxdepth 2 -name '*.app' -type d | head -1)"
 [ -n "$APP_DIR" ] || { echo "ERROR: no .app found in IPA" >&2; exit 1; }
 
