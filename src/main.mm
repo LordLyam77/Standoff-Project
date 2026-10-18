@@ -8,6 +8,7 @@
 #import <time.h>
 #import <string.h>
 #import <sys/mman.h>
+#import <libkern/OSCacheControl.h>
 #import "cheat_data.h"
 #import "menu.h"
 #import "overlay.h"
@@ -104,7 +105,7 @@ static void PatchReturnZero(void* addr) {
     }
     const uint32_t insn[2] = { 0xD2800000, 0xD65F03C0 }; // MOV X0,#0; RET
     memcpy(addr, insn, 8);
-    __builtin___clear_cache((char*)addr, (char*)addr + 8);
+    sys_icache_invalidate(addr, 8);
     mprotect((void*)page, len, PROT_READ | PROT_EXEC);
     CHEAT_LOG("ac: patched %p", addr);
 }
