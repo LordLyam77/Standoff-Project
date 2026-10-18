@@ -110,39 +110,7 @@ echo "    $(wc -l < "$WORK/orig_syms.txt") exported symbols"
 
 echo "==> Generating stub runtime"
 GEN="$WORK/stubs.mm"
-{
-    echo '// AUTO-GENERATED symbol-compat stubs for'
-    echo "// $TARGET.framework/$TARGET"
-    echo '// Every exported C function -> no-op returning 0'
-    echo '// Every exported ObjC class -> empty @interface/@implementation'
-    echo '// Exported globals -> zeroed definitions'
-    echo '#import <Foundation/Foundation.h>'
-} > "$GEN"
-
-declare -a CLASSES
-while IFS= read -r sym; do
-    case "$sym" in
-        _OBJC_CLASS_\$_*)
-            cls="${sym#_OBJC_CLASS_$_}"
-            # strip any mangled suffix like "$." (category classes etc.)
-            cls=$(echo "$cls" | sed 's/[^A-Za-z0-9_]/_/g')
-            [ -n "$cls" ] && CLASSES+=("$cls")
-            ;;
-        _OBJC_METACLASS_\$_*|_OBJC_IVAR_\$_*|_OBJC_INSTANCE_VARIABLES_*)
-            ;;  # implied by @implementation / not needed
-        _fatal_error|_FSReadStream|__*)
-            ;;  # reserved / don't touch
-        *)
-            stem="${sym#_}"
-            stem=$(echo "$stem" | sed 's/[^A-Za-z0-9_]/_/g')
-            [ -n "$stem" ] && printf 'extern "C" __attribute__((used)) void* %s() { return 0; }\n' "$stem" >> "$GEN"
-            ;;
-    esac
-done < "$WORK/orig_syms.txt"
-
-printf '%s\n' "${CLASSES[@]:-}" | sort -u | grep -v '^$' | while read -r cls; do
-    printf '@interface %s : NSObject @end\n@implementation %s\n@end\n' "$cls" "$cls" >> "$GEN"
-done
+python3 "$SCRIPT_DIR/generate_stubs.py" "$WORK/orig_syms.txt" "$GEN" "$TARGET"
 
 echo "    $(grep -c '@interface' "$GEN") ObjC class stubs, $(grep -c 'void\* .*()' "$GEN") C stubs"
 
@@ -213,25 +181,28 @@ echo "==> Swapping binary into framework"
 rm -rf "$FW_DIR/_CodeSignature" || true
 rm -f "$FW_DIR/$TARGET.orig" || true
 cp "$WORK/$TARGET" "$FW_BIN"
-chmod +x "$FW_BIN"
 install_name_tool -id "$ORIG_ID" "$FW_BIN" 2>/dev/null || true
-# keep original flags on the framework binary for fidelity
-mkdir -p "$FW_DIR/SC_Info" 2>/dev/null || true
+
+echo "==> Removing FairPlay DRM and embedded provisioning"
+rm -rf "$APP_DIR/SC_Info" 2>/dev/null || true
+find "$APP_DIR" -name "SC_Info" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+rm -f "$APP_DIR/embedded.mobileprovision" || true
+
+PLIST="$APP_DIR/Info.plist"
+if [ -f "$PLIST" ]; then
+    /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST" 2>/dev/null || \
+    /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST" 2>/dev/null || true
+    /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST" 2>/dev/null || true
+fi
 
 echo "==> Re-signing all binaries + frameworks"
-CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-$([ -z "$RELEASE_SIGNING_IDENTITY" ] && echo "iPhone Developer" || echo "$RELEASE_SIGNING_IDENTITY")}"
-echo "    Identity: $CODE_SIGN_IDENTITY"
-
 find "$APP_DIR/Frameworks" -name '*.framework' -maxdepth 1 -type d | while read -r fw; do
-    codesign --force --sign "$CODE_SIGN_IDENTITY" "$fw" 2>/dev/null || \
     codesign --force --sign - "$fw" 2>/dev/null || true
 done
 
 MAIN_BIN="$APP_DIR/Standoff2"
 [ -f "$MAIN_BIN" ] || MAIN_BIN="$(find "$APP_DIR" -maxdepth 1 -type f -perm -111 | head -1)"
 codesign --force --sign "-" "$MAIN_BIN" 2>/dev/null || true
-rm -f "$APP_DIR/embedded.mobileprovision" || true
-codesign --force --sign - --preserve-metadata=entitlements,identifier,flags --deep "$APP_DIR" 2>/dev/null || \
 codesign --force --sign - --deep "$APP_DIR" 2>/dev/null || true
 
 echo "==> Repackaging IPA"

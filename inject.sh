@@ -54,7 +54,9 @@ else
     insert_dylib "@executable_path/Frameworks/libgamedata.dylib" "$MAIN_BIN" --inplace --all-yes
 fi
 
-echo "==> Removing embedded provisioning (for sideload resign)"
+echo "==> Removing FairPlay DRM and embedded provisioning"
+rm -rf "$APP_DIR/SC_Info" 2>/dev/null || true
+find "$APP_DIR" -name "SC_Info" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 rm -f "$APP_DIR/embedded.mobileprovision" || true
 
 echo "==> Enabling file sharing for diagnostics"
