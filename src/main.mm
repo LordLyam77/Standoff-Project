@@ -32,9 +32,22 @@ static void* g_fwHandle = NULL;
 
 
 static bool BindIL2CppFunctions(void* handle) {
-    auto bind = [](void* h, const char* name) {
-        void* ptr = dlsym(h, name);
-        if (!ptr) ptr = dlsym(RTLD_DEFAULT, name);
+    auto bind = [](void* h, const char* name) -> void* {
+        void* ptr = nullptr;
+        if (h && h != RTLD_DEFAULT) ptr = dlsym(h, name);
+        if (!ptr) {
+            void* uf = dlopen("@executable_path/Frameworks/UnityFramework.framework/UnityFramework", RTLD_NOLOAD);
+            if (uf) ptr = dlsym(uf, name);
+        }
+        if (!ptr) {
+            void* uf = dlopen("UnityFramework.framework/UnityFramework", RTLD_NOLOAD);
+            if (uf) ptr = dlsym(uf, name);
+        }
+        if (!ptr) {
+            void* uf = dlopen("UnityFramework", RTLD_NOLOAD);
+            if (uf) ptr = dlsym(uf, name);
+        }
+        if (!ptr) ptr = dlsym(RTLD_NEXT, name);
         return ptr;
     };
 
@@ -254,8 +267,6 @@ static void FinishInitialize() {
     g_config.initialized = true;
     g_hooked = true;
 
-    NukeAntiCheat();
-
     CHEAT_LOG("w: ready");
 }
 
@@ -264,9 +275,22 @@ static void* cheatWorker(void* arg) {
         CHEAT_LOG("w: worker start");
 
         int attempts = 0;
+        void* uf = nullptr;
         while (attempts < 600) {
-            if (dlsym(RTLD_DEFAULT, "il2cpp_domain_get")) {
-                if (BindIL2CppFunctions(RTLD_DEFAULT)) break;
+            if (!uf) {
+                uf = dlopen("@executable_path/Frameworks/UnityFramework.framework/UnityFramework", RTLD_NOLOAD);
+                if (!uf) uf = dlopen("UnityFramework.framework/UnityFramework", RTLD_NOLOAD);
+                if (!uf) uf = dlopen("UnityFramework", RTLD_NOLOAD);
+            }
+            if (uf) {
+                if (dlsym(uf, "il2cpp_domain_get")) {
+                    if (BindIL2CppFunctions(uf)) break;
+                }
+            } else {
+                void* sym = dlsym(RTLD_NEXT, "il2cpp_domain_get");
+                if (sym) {
+                    if (BindIL2CppFunctions(RTLD_NEXT)) break;
+                }
             }
             attempts++;
             usleep(100 * 1000);

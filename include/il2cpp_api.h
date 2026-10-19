@@ -14,6 +14,7 @@ typedef struct Il2CppThread Il2CppThread;
 typedef struct Il2CppException Il2CppException;
 typedef struct Il2CppArray Il2CppArray;
 
+#pragma GCC visibility push(hidden)
 extern "C" {
     extern const Il2CppDomain* (*il2cpp_domain_get)();
     extern const Il2CppAssembly** (*il2cpp_domain_get_assemblies)(const Il2CppDomain* domain, size_t* size);
@@ -65,3 +66,4 @@ extern "C" {
     extern const Il2CppMethodInfo* (*il2cpp_class_get_methods)(const Il2CppClass* klass, Il2CppIterator* iter);
     extern int (*il2cpp_class_get_method_count)(const Il2CppClass* klass);
 }
+#pragma GCC visibility pop

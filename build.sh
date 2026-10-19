@@ -41,6 +41,7 @@ $CLANG -x objective-c++ \
   -fobjc-arc \
   -fobjc-runtime=ios \
   -O2 \
+  -fvisibility=hidden \
   -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
   -I"$INCDIR" \
   -I"$SRCDIR" \

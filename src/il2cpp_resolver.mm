@@ -3,7 +3,7 @@
 #include <cstdio>
 #include "tracelog.h"
 
-#define DEFINE_FPTR(ret, name, args) ret (*name) args = nullptr
+#define DEFINE_FPTR(ret, name, args) __attribute__((visibility("hidden"))) ret (*name) args = nullptr
 
 extern "C" {
     DEFINE_FPTR(const Il2CppDomain*, il2cpp_domain_get, ());

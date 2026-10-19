@@ -6,6 +6,13 @@ extern IL2CPPResolver* GetResolver();
 Vector3 WorldToScreenPoint(void* camera, Vector3 world) {
     auto* r = GetResolver();
     if (!r || !camera || !r->classes.Camera) return {};
+    if (il2cpp_thread_attach && il2cpp_domain_get && il2cpp_domain_get()) {
+        static thread_local bool s_attached = false;
+        if (!s_attached) {
+            il2cpp_thread_attach(il2cpp_domain_get());
+            s_attached = true;
+        }
+    }
     const Il2CppMethodInfo* m = il2cpp_class_get_method_from_name(r->classes.Camera, "WorldToScreenPoint", 1);
     if (!m) return {};
     Il2CppException* exc = nullptr;
