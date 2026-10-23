@@ -3,119 +3,156 @@
 #import "w2s.h"
 #import "tracelog.h"
 #import <time.h>
+#import <cmath>
 
 extern IL2CPPResolver* GetResolver();
 static ESP s_esp;
 
-static bool s_loggedMatch = false;
-static bool s_loggedEmpty = true;
+// --- safe field readers -----------------------------------------------------
 
 static Vector3 ReadVector3(void* obj, const Il2CppClass* klass, const char* field) {
-    Vector3 out;
-    auto* r = GetResolver();
-    if (!r || !obj || !klass) return {};
+    if (!obj || !klass || !field) return {};
     const Il2CppFieldInfo* f = il2cpp_class_get_field_from_name(klass, field);
     if (!f) return {};
+    Vector3 out;
     il2cpp_field_get_value(obj, f, &out);
     return out;
 }
 
 static float ReadFloat(void* obj, const Il2CppClass* klass, const char* field) {
-    auto* r = GetResolver();
-    if (!r || !obj || !klass) return 0;
+    if (!obj || !klass || !field) return 0;
     const Il2CppFieldInfo* f = il2cpp_class_get_field_from_name(klass, field);
     if (!f) return 0;
-    float v = 0; il2cpp_field_get_value(obj, f, &v); return v;
+    float v = 0;
+    il2cpp_field_get_value(obj, f, &v);
+    return v;
 }
 
 static int ReadInt(void* obj, const Il2CppClass* klass, const char* field) {
-    auto* r = GetResolver();
-    if (!r || !obj || !klass) return 0;
+    if (!obj || !klass || !field) return 0;
     const Il2CppFieldInfo* f = il2cpp_class_get_field_from_name(klass, field);
     if (!f) return 0;
-    int v = 0; il2cpp_field_get_value(obj, f, &v); return v;
+    int v = 0;
+    il2cpp_field_get_value(obj, f, &v);
+    return v;
 }
 
 static bool ReadBool(void* obj, const Il2CppClass* klass, const char* field) {
-    auto* r = GetResolver();
-    if (!r || !obj || !klass) return false;
+    if (!obj || !klass || !field) return false;
     const Il2CppFieldInfo* f = il2cpp_class_get_field_from_name(klass, field);
     if (!f) return false;
-    unsigned char v = 0; il2cpp_field_get_value(obj, f, &v); return v != 0;
+    unsigned char v = 0;
+    il2cpp_field_get_value(obj, f, &v);
+    return v != 0;
 }
 
-static void* GetObjectField(void* obj, const Il2CppClass* klass, const char* field) {
-    auto* r = GetResolver();
-    if (!r || !obj || !klass) return nullptr;
+static bool HasField(const Il2CppClass* klass, const char* field) {
+    return klass && field && il2cpp_class_get_field_from_name(klass, field) != nullptr;
+}
+
+// IL2CPP strings are UTF-16. The old code never read them at all.
+static void ReadString(void* obj, const Il2CppClass* klass, const char* field, char* out, size_t cap) {
+    if (!out || cap == 0) return;
+    out[0] = 0;
+    if (!obj || !klass || !field || !il2cpp_string_length || !il2cpp_string_chars) return;
     const Il2CppFieldInfo* f = il2cpp_class_get_field_from_name(klass, field);
-    if (!f) return nullptr;
-    Il2CppObject* v = nullptr; il2cpp_field_get_value(obj, f, &v); return v;
+    if (!f) return;
+    Il2CppObject* s = nullptr;
+    il2cpp_field_get_value(obj, f, &s);
+    if (!s) return;
+
+    int len = il2cpp_string_length(s);
+    const Il2CppChar* chars = il2cpp_string_chars(s);
+    if (!chars || len <= 0) return;
+
+    size_t n = 0;
+    for (int i = 0; i < len && n + 1 < cap; i++) {
+        uint32_t c = chars[i];
+        if (c < 0x80) {
+            out[n++] = (char)c;
+        } else if (c < 0x800) {
+            out[n++] = (char)(0xC0 | (c >> 6));
+            if (n + 1 < cap) out[n++] = (char)(0x80 | (c & 0x3F));
+        } else {
+            out[n++] = (char)(0xE0 | (c >> 12));
+            if (n + 1 < cap) out[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            if (n + 1 < cap) out[n++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    out[n] = 0;
 }
 
-static Vector3 GetTransformPosition(void* transform) {
-    auto* r = GetResolver();
-    if (!r || !r->classes.Transform || !transform) return {};
-    const Il2CppMethodInfo* m = il2cpp_class_get_method_from_name(r->classes.Transform, "get_position", 0);
-    if (!m) return {};
-    Il2CppObject* res = il2cpp_runtime_invoke(m, transform, nullptr, nullptr);
-    if (!res) return {};
-    return *(Vector3*)il2cpp_object_unbox(res);
-}
+// --- camera / player discovery ---------------------------------------------
 
-static void* GetComponent(void* obj, const Il2CppClass* componentClass) {
+static void* GetMainCamera() {
     auto* r = GetResolver();
-    if (!r || !obj || !componentClass || !r->classes.Component) return nullptr;
-    const Il2CppMethodInfo* m = il2cpp_class_get_method_from_name(r->classes.Component, "GetComponent", 1);
-    if (!m) return nullptr;
+    if (!r || !r->classes.Camera) return nullptr;
+    const Il2CppMethodInfo* getMain = il2cpp_class_get_method_from_name(r->classes.Camera, "get_main", 0);
+    if (!getMain) return nullptr;
     Il2CppException* exc = nullptr;
-    void* params[] = { (void*)componentClass };
-    return (void*)il2cpp_runtime_invoke(m, obj, params, &exc);
+    Il2CppObject* cam = il2cpp_runtime_invoke(getMain, nullptr, nullptr, &exc);
+    if (exc) return nullptr;
+    return cam;
 }
 
-static void* GetInsideComponent(void* component, const Il2CppClass* targetClass) {
+static Il2CppArray* FindObjectsOfType(const Il2CppClass* klass) {
     auto* r = GetResolver();
-    if (!r || !component) return nullptr;
-    const Il2CppMethodInfo* m = il2cpp_class_get_method_from_name(r->classes.Component, "GetComponent", 1);
+    if (!r || !klass || !r->classes.Object) return nullptr;
+
+    // Object.FindObjectsOfType(Type) — the parameter must be a System.Type object.
+    const Il2CppMethodInfo* m = il2cpp_class_get_method_from_name(r->classes.Object, "FindObjectsOfType", 1);
     if (!m) return nullptr;
-    void* params[] = { (void*)targetClass };
-    return (void*)il2cpp_runtime_invoke(m, component, params, nullptr);
+
+    const Il2CppType* t = il2cpp_class_get_type(klass);
+    Il2CppObject* typeObj = t ? il2cpp_type_get_object(t) : nullptr;
+    if (!typeObj) return nullptr;
+
+    Il2CppException* exc = nullptr;
+    void* params[] = { typeObj };
+    Il2CppObject* res = il2cpp_runtime_invoke(m, nullptr, params, &exc);
+    if (exc || !res) return nullptr;
+    return (Il2CppArray*)res;
 }
 
-static Vector3 GetBonePosition(void* playerController) {
-    auto* r = GetResolver();
-    if (!r || !playerController) return {};
-
-    void* biped = nullptr;
-    if (r->classes.BipedMap) {
-        biped = GetInsideComponent(playerController, r->classes.BipedMap);
-        if (!biped && r->classes.PlayerCharacterView) {
-            void* view = GetInsideComponent(playerController, r->classes.PlayerCharacterView);
-            if (view) biped = GetInsideComponent(view, r->classes.BipedMap);
-        }
-    }
-
-    Vector3 head;
-    const char* headCandidates[] = {
-        "headPosition", "HeadPosition", "_headWorldPosition",
-        "headWorldPosition", "_headPos", "_head", "headBone",
-        nullptr
+static const Il2CppClass* PickPlayerClass(IL2CPPResolver* r) {
+    if (!r) return nullptr;
+    // Cycle through the candidates. If a class exists but has no scene
+    // instances (a plain data class, not a MonoBehaviour), we need to try the
+    // next one instead of staring at an empty array forever.
+    static int cursor = 0;
+    const Il2CppClass* cands[4] = {
+        r->classes.PlayerController,
+        r->classes.PlayerCharacterView,
+        r->classes.PlayerView,
+        r->classes.Player
     };
-
-    if (biped) {
-        for (int i = 0; headCandidates[i]; i++) {
-            const Il2CppFieldInfo* f = il2cpp_class_get_field_from_name(r->classes.BipedMap, headCandidates[i]);
-            if (!f) continue;
-            il2cpp_field_get_value(biped, f, &head);
-            if (head.x != 0 || head.y != 0 || head.z != 0) return head;
-        }
-        void* headBone = GetInsideComponent(biped, r->classes.Transform);
-        if (headBone) {
-            Vector3 pos = GetTransformPosition(headBone);
-            if (pos.x != 0 || pos.y != 0 || pos.z != 0) return pos;
-        }
+    for (int i = 0; i < 4; i++) {
+        int k = (cursor + i) % 4;
+        if (cands[k]) { cursor = (k + 1) % 4; return cands[k]; }
     }
-    return {};
+    return nullptr;
 }
+
+static bool ReadAnyFloat(void* obj, const Il2CppClass* klass, const char** fields, float* out) {
+    for (int i = 0; fields[i]; i++) {
+        if (!HasField(klass, fields[i])) continue;
+        float v = ReadFloat(obj, klass, fields[i]);
+        if (v > 0.01f) { *out = v; return true; }
+    }
+    return false;
+}
+
+static bool ReadAnyInt(void* obj, const Il2CppClass* klass, const char** fields, int* out) {
+    for (int i = 0; fields[i]; i++) {
+        if (!HasField(klass, fields[i])) continue;
+        int v = ReadInt(obj, klass, fields[i]);
+        *out = v;
+        return true;
+    }
+    return false;
+}
+
+// --- ESP --------------------------------------------------------------------
 
 void ESP::Initialize() {
     CHEAT_LOG("e: init");
@@ -127,149 +164,157 @@ void ESP::Update() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-    if (now - m_lastCollect < 0.2) return;
+    if (now - m_lastCollect < 0.08) return;
     m_lastCollect = now;
 
     CollectPlayers();
 }
 
-static void* GetAllPlayers() {
-    auto* r = GetResolver();
-    if (!r || !r->classes.PlayerController || !r->classes.Object) return nullptr;
-    const Il2CppMethodInfo* m = il2cpp_class_get_method_from_name(
-        r->classes.Object, "FindObjectsOfType", 1);
-    if (m) {
-        const Il2CppType* t = il2cpp_class_get_type(r->classes.PlayerController);
-        Il2CppObject* typeObj = il2cpp_type_get_object(t);
-        if (!typeObj) return nullptr;
-        void* params[] = { typeObj };
-        Il2CppException* exc = nullptr;
-        return (void*)il2cpp_runtime_invoke(m, nullptr, params, &exc);
-    }
-    return nullptr;
-}
-
 void ESP::CollectPlayers() {
-    std::vector<PlayerData> collected;
-    collected.reserve(16);
-
     auto* r = GetResolver();
     if (!r) return;
 
-    void* camera = nullptr;
-    if (r->classes.Camera) {
-        const Il2CppMethodInfo* getMain = il2cpp_class_get_method_from_name(r->classes.Camera, "get_main", 0);
-        if (getMain) {
-            Il2CppException* exc = nullptr;
-            camera = (void*)il2cpp_runtime_invoke(getMain, nullptr, nullptr, &exc);
-        }
-    }
-    if (!camera) return;
-    g_mainCamera = camera;
+    void* camera = GetMainCamera();
+    if (camera) g_mainCamera = camera;
 
-    Vector3 localPos = {0,0,0};
-    void* cameraTransform = GetInsideComponent(camera, r->classes.Transform);
-    if (cameraTransform) localPos = GetTransformPosition(cameraTransform);
-
-    Il2CppArray* allPlayers = (Il2CppArray*)GetAllPlayers();
-    if (!allPlayers) {
+    if (!m_playerClass) m_playerClass = PickPlayerClass(r);
+    if (!m_playerClass) {
+        if (!m_loggedEmpty) { CHEAT_LOG("e: no player class resolved"); m_loggedEmpty = true; }
         return;
     }
 
-    uintptr_t count = il2cpp_array_length(allPlayers);
-    if (count > 64) count = 64;
+    Il2CppArray* all = FindObjectsOfType(m_playerClass);
+    if (!all) {
+        std::lock_guard<std::recursive_mutex> lock(g_playersMutex);
+        g_players.clear();
+        return;
+    }
+
+    uintptr_t count = il2cpp_array_length ? il2cpp_array_length(all) : 0;
+    if (count > 128) count = 128;
+
+    if (count == 0) {
+        static int emptyScans = 0;
+        if ((++emptyScans % 10) == 0) {
+            m_playerClass = PickPlayerClass(r);
+            CHEAT_LOG("e: scan empty, cycling player class -> %s",
+                      m_playerClass ? il2cpp_class_get_name(m_playerClass) : "none");
+        }
+        std::lock_guard<std::recursive_mutex> lock(g_playersMutex);
+        g_players.clear();
+        return;
+    }
+
+    std::vector<PlayerData> collected;
+    collected.reserve(count);
+
+    static const char* hpFields[] = { "_hp", "_health", "health", "Health", "_currentHp", "hp", "HealthPoints", nullptr };
+    static const char* maxHpFields[] = { "_maxHp", "_maxHealth", "maxHealth", "MaxHealth", "MaxHealthPoints", nullptr };
+    static const char* teamFields[] = { "_team", "team", "Team", "playerTeam", "_teamId", "TeamId", "_command", nullptr };
+    static const char* aliveFields[] = { "_alive", "isAlive", "IsAlive", "_isAlive", "alive", "_isDead", nullptr };
+    static const char* localFields[] = { "isLocal", "_isLocal", "isLocalPlayer", "_isLocalPlayer", "isMyPlayer", "isMine", "local", nullptr };
+    static const char* nameFields[] = { "_nickname", "nickname", "Nickname", "_name", "name", "playerName", "PlayerName", "_displayName", nullptr };
+
+    Vector3 camPos = {};
+    if (camera) {
+        void* camT = GetTransformOf(camera);
+        if (camT) camPos = GetTransformPositionOf(camT);
+    }
+
+    void* localObj = nullptr;
+    Vector3 localPos = camPos;
 
     for (uintptr_t i = 0; i < count; i++) {
-        void* player = il2cpp_array_get(allPlayers, i);
+        void* player = il2cpp_array_object_at(all, i);
         if (!player) continue;
 
         PlayerData pd = {};
         pd.obj = player;
+        pd.transform = GetTransformOf(player);
+        if (!pd.transform) continue;
 
-        void* transform = GetInsideComponent(player, r->classes.Transform);
-        if (transform) pd.position = GetTransformPosition(transform);
+        pd.position = GetTransformPositionOf(pd.transform);
+        Vector3 up = GetTransformUpOf(pd.transform);
+        pd.headPosition = pd.position + up * 1.62f;
 
-        Vector3 head = GetBonePosition(player);
-        if (head.x != 0 || head.y != 0 || head.z != 0) {
-            pd.headPosition = head;
-        } else {
-            pd.headPosition = pd.position;
-            pd.headPosition.y += 1.7f;
-        }
-
-        pd.health = 100;
-        pd.maxHealth = 100;
-        const char* hpFields[] = {"_hp", "_health", "health", "Health", "_currentHp", "hp", nullptr};
-        for (int f = 0; hpFields[f]; f++) {
-            float v = ReadFloat(player, r->classes.PlayerController, hpFields[f]);
-            if (v > 0) { pd.health = v; break; }
-        }
-        const char* mhpFields[] = {"_maxHp", "_maxHealth", "maxHealth", "MaxHealth", nullptr};
-        for (int f = 0; mhpFields[f]; f++) {
-            float v = ReadFloat(player, r->classes.PlayerController, mhpFields[f]);
-            if (v > 0) { pd.maxHealth = v; break; }
-        }
-        if (pd.maxHealth <= 0) pd.maxHealth = 100;
+        pd.health = 100.0f;
+        pd.maxHealth = 100.0f;
+        ReadAnyFloat(player, m_playerClass, hpFields, &pd.health);
+        ReadAnyFloat(player, m_playerClass, maxHpFields, &pd.maxHealth);
+        if (pd.maxHealth <= 0.01f) pd.maxHealth = 100.0f;
 
         pd.team = 0;
-        int teamReads = 0;
-        const char* teamFields[] = {"_team", "team", "Team", "playerTeam", "_teamId", "TeamId", nullptr};
-        for (int f = 0; teamFields[f]; f++) {
-            const Il2CppFieldInfo* fi = il2cpp_class_get_field_from_name(r->classes.PlayerController, teamFields[f]);
-            if (!fi) continue;
-            teamReads++;
-            int v = 0;
-            il2cpp_field_get_value(player, fi, &v);
-            if (v != 0) { pd.team = v; break; }
-        }
+        ReadAnyInt(player, m_playerClass, teamFields, &pd.team);
 
         pd.alive = true;
-        const char* aliveFields[] = {"_alive", "isAlive", "IsAlive", "_isAlive", "alive", nullptr};
-        for (int f = 0; aliveFields[f]; f++) {
-            if (il2cpp_class_get_field_from_name(r->classes.PlayerController, aliveFields[f])) {
-                pd.alive = ReadBool(player, r->classes.PlayerController, aliveFields[f]);
-                break;
-            }
+        for (int a = 0; aliveFields[a]; a++) {
+            if (!HasField(m_playerClass, aliveFields[a])) continue;
+            if (strcmp(aliveFields[a], "_isDead") == 0) pd.alive = !ReadBool(player, m_playerClass, aliveFields[a]);
+            else pd.alive = ReadBool(player, m_playerClass, aliveFields[a]);
+            break;
         }
 
-        Vector3 diff = pd.position - localPos;
-        pd.distance = sqrtf(diff.x*diff.x + diff.y*diff.y + diff.z*diff.z);
+        for (int n = 0; nameFields[n] && pd.name[0] == 0; n++)
+            ReadString(player, m_playerClass, nameFields[n], pd.name, sizeof(pd.name));
 
-        if (g_mainCamera) {
-            Vector3 ws = WorldToScreenPoint(g_mainCamera, pd.position);
-            pd.screen = ws;
-            pd.onScreen = ws.z > 0.05f;
+        bool isLocal = false;
+        for (int l = 0; localFields[l]; l++) {
+            if (!HasField(m_playerClass, localFields[l])) continue;
+            isLocal = ReadBool(player, m_playerClass, localFields[l]);
+            break;
         }
-
-        pd.espColor = pd.team == 2 ? Color::Blue() : Color::Red();
-        pd.isLocal = pd.team == 0 && pd.distance < 0.3f;
+        pd.isLocal = isLocal;
+        if (isLocal && !localObj) {
+            localObj = player;
+            localPos = pd.position;
+            g_localPlayer = player;
+        }
 
         collected.push_back(pd);
     }
 
-    float nearestDist = 1e9f;
-    size_t nearestIdx = SIZE_MAX;
-    for (size_t i = 0; i < collected.size(); i++) {
-        if (collected[i].distance < nearestDist) {
-            nearestDist = collected[i].distance;
-            nearestIdx = i;
+    // If the game exposes no isLocal flag, the closest body to the camera is us.
+    if (!localObj && !collected.empty()) {
+        float best = 1e9f;
+        int bestIdx = -1;
+        for (size_t i = 0; i < collected.size(); i++) {
+            float d = collected[i].position.Distance(camPos);
+            if (d < best) { best = d; bestIdx = (int)i; }
+        }
+        if (bestIdx >= 0) {
+            collected[bestIdx].isLocal = true;
+            localObj = collected[bestIdx].obj;
+            localPos = collected[bestIdx].position;
+            g_localPlayer = localObj;
         }
     }
-    if (nearestIdx != SIZE_MAX) {
-        collected[nearestIdx].isLocal = true;
-        g_localPlayer = collected[nearestIdx].obj;
+
+    // Distances + projection (all in Unity pixel space here; Render converts).
+    for (auto& pd : collected) {
+        pd.distance = pd.position.Distance(localPos);
+        pd.espColor = (pd.team == 2) ? Color::Blue() : Color::Red();
+
+        pd.onScreen = false;
+        if (g_mainCamera) {
+            Vector3 h = WorldToScreenPoint(g_mainCamera, pd.headPosition);
+            Vector3 f = WorldToScreenPoint(g_mainCamera, pd.position);
+            if (h.z > 0.05f) {
+                pd.headScreen = { h.x, h.y };
+                pd.feetScreen = { f.x, f.y };
+                pd.onScreen = true;
+            }
+        }
     }
 
-    std::lock_guard<std::recursive_mutex> lock(g_playersMutex);
-    g_players.swap(collected);
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_playersMutex);
+        g_players.swap(collected);
+    }
 
-    if (!g_players.empty() && !s_loggedMatch) {
-        CHEAT_LOG("e: first match — %zu players", g_players.size());
-        s_loggedMatch = true;
-        s_loggedEmpty = false;
-    } else if (g_players.empty() && !s_loggedEmpty) {
-        CHEAT_LOG("e: scan returned empty");
-        s_loggedEmpty = true;
+    if (!g_players.empty() && !m_loggedFirstMatch) {
+        CHEAT_LOG("e: first scan — %zu objects via %s (local=%p)",
+                  g_players.size(), il2cpp_class_get_name(m_playerClass), localObj);
+        m_loggedFirstMatch = true;
     }
 }
 
@@ -285,49 +330,59 @@ void ESP::Render(CGContextRef ctx, CGFloat width, CGFloat height) {
         snapshot = g_players;
     }
 
-    CGFloat thickness = 1.5f;
+    // WorldToScreenPoint is in Unity pixels. UIKit drawRect is in points.
+    // The old build multiplied by UIScreen.scale instead, which pushed every
+    // box off-screen on 2x/3x devices.
+    auto* r = GetResolver();
+    int uw = r ? r->UnityScreenWidth() : 0;
+    int uh = r ? r->UnityScreenHeight() : 0;
+    float pppX = (uw > 0 && width > 0) ? ((float)uw / (float)width) : 1.0f;
+    float pppY = (uh > 0 && height > 0) ? ((float)uh / (float)height) : 1.0f;
 
-    for (auto& player : snapshot) {
-        if (player.isLocal || !player.alive) continue;
-        if (!player.onScreen) continue;
+    CGFloat thickness = 1.4f;
 
-        Vector2 screen;
-        float dist = player.screen.z;
-        if (dist <= 0) continue;
-        screen.x = player.screen.x;
-        screen.y = m_screenHeight - player.screen.y;
-        if (screen.x <= 0 || screen.y <= 0 || screen.x >= width || screen.y >= height) continue;
+    for (auto& p : snapshot) {
+        if (p.isLocal || !p.alive) continue;
+        if (!p.onScreen) continue;
 
-        Color col = g_config.espTeamColor ? player.espColor : Color::Yellow();
+        float hx = p.headScreen.x / pppX;
+        float hy = height - (p.headScreen.y / pppY);
+        float fx = p.feetScreen.x / pppX;
+        float fy = height - (p.feetScreen.y / pppY);
 
-        float boxH = 90.0f / (dist / 10.0f);
-        if (boxH < 10) boxH = 10;
-        if (boxH > height * 0.8f) boxH = height * 0.8f;
-        float boxW = boxH * 0.6f;
+        if (!std::isfinite(hx) || !std::isfinite(hy) || !std::isfinite(fx) || !std::isfinite(fy)) continue;
 
-        if (g_config.espBoxes) DrawBox(ctx, screen, boxW, boxH, col, thickness);
+        float boxH = fabsf(fy - hy);
+        if (boxH < 6.0f) boxH = 6.0f;
+        if (boxH > height) boxH = height;
+        float boxW = boxH * 0.52f;
+        float cx = (hx + fx) * 0.5f;
+        float cy = (hy + fy) * 0.5f;
 
-        if (g_config.espHealthBars) {
-            DrawHealthBar(ctx, {screen.x - boxW/2 - 6, screen.y - boxH/2}, boxH, player.health, player.maxHealth);
-        }
+        if (cx < -boxW || cx > width + boxW) continue;
 
-        if (g_config.espNames && strlen(player.name) > 0) {
-            DrawText(ctx, player.name, screen.x, screen.y - boxH/2 - 14, col, 1.1f);
-        }
+        Color col = g_config.espTeamColor ? p.espColor : Color::Yellow();
+
+        if (g_config.espBoxes) DrawBox(ctx, {cx, cy}, boxW, boxH, col, thickness);
+
+        if (g_config.espHealthBars)
+            DrawHealthBar(ctx, {cx - boxW / 2 - 6, cy - boxH / 2}, boxH, p.health, p.maxHealth);
+
+        if (g_config.espNames && p.name[0])
+            DrawText(ctx, p.name, cx, hy - 16, col, 1.1f);
 
         if (g_config.espDistance) {
             char buf[32];
-            snprintf(buf, sizeof(buf), "%dm", (int)dist);
-            DrawText(ctx, buf, screen.x, screen.y + boxH/2 + 10, Color::White(), 0.9f);
+            snprintf(buf, sizeof(buf), "%dm", (int)p.distance);
+            DrawText(ctx, buf, cx, fy + 4, Color::White(), 0.95f);
         }
 
-        if (g_config.espSnaplines) {
-            DrawSnapline(ctx, {screen.x, screen.y + boxH/2}, col);
-        }
+        if (g_config.espSnaplines) DrawSnapline(ctx, {cx, fy}, col);
     }
 
     if (g_config.aimbotEnabled && g_config.aimbotShowFov && g_config.aimbotFov > 0) {
-        DrawCircle(ctx, width/2, height/2, g_config.aimbotFov, Color::Yellow(), 1.0f);
+        float radius = height * 0.5f * (g_config.aimbotFov / 180.0f);
+        DrawCircle(ctx, width / 2, height / 2, radius, Color::Yellow(), 1.0f);
     }
 }
 
@@ -342,8 +397,8 @@ bool ESP::WorldToScreen(Vector3 world, Vector2& screen, float& distance) {
 }
 
 void ESP::DrawBox(CGContextRef ctx, Vector2 center, float w, float h, Color color, float thickness) {
-    CGFloat x1 = center.x - w/2, y1 = center.y - h/2;
-    CGFloat x2 = center.x + w/2, y2 = center.y + h/2;
+    CGFloat x1 = center.x - w / 2, y1 = center.y - h / 2;
+    CGFloat x2 = center.x + w / 2, y2 = center.y + h / 2;
 
     CGContextSetRGBStrokeColor(ctx, color.r, color.g, color.b, color.a);
     CGContextSetLineWidth(ctx, thickness);
@@ -370,7 +425,7 @@ void ESP::DrawBox(CGContextRef ctx, Vector2 center, float w, float h, Color colo
     CGContextStrokePath(ctx);
 
     if (color.a >= 0.2f) {
-        CGContextSetRGBFillColor(ctx, color.r, color.g, color.b, 0.2f * color.a);
+        CGContextSetRGBFillColor(ctx, color.r, color.g, color.b, 0.08f * color.a);
         CGContextFillRect(ctx, CGRectMake(x1, y1, w, h));
     }
 }
@@ -400,6 +455,7 @@ void ESP::DrawHealthBar(CGContextRef ctx, Vector2 pos, float height, float healt
 void ESP::DrawText(CGContextRef ctx, const char* text, float x, float y, Color color, float scale) {
     if (!text || strlen(text) == 0) return;
     NSString* str = [NSString stringWithUTF8String:text];
+    if (!str) return;
     NSDictionary* attrs = @{
         NSFontAttributeName: [UIFont systemFontOfSize:11 * scale],
         NSForegroundColorAttributeName: [UIColor colorWithRed:color.r green:color.g blue:color.b alpha:color.a],
@@ -407,8 +463,7 @@ void ESP::DrawText(CGContextRef ctx, const char* text, float x, float y, Color c
         NSStrokeWidthAttributeName: @-2.0f
     };
     CGSize size = [str sizeWithAttributes:attrs];
-    CGPoint point = {x - size.width/2, y};
-    [str drawAtPoint:point withAttributes:attrs];
+    [str drawAtPoint:CGPointMake(x - size.width / 2, y) withAttributes:attrs];
 }
 
 void ESP::DrawLine(CGContextRef ctx, float x1, float y1, float x2, float y2, Color color, float thickness) {
@@ -427,9 +482,9 @@ void ESP::DrawCircle(CGContextRef ctx, float cx, float cy, float radius, Color c
 }
 
 void ESP::DrawSnapline(CGContextRef ctx, Vector2 bottom, Color color) {
-    CGContextSetRGBStrokeColor(ctx, color.r, color.g, color.b, 0.6f);
+    CGContextSetRGBStrokeColor(ctx, color.r, color.g, color.b, 0.5f);
     CGContextSetLineWidth(ctx, 1.0f);
-    CGContextMoveToPoint(ctx, m_screenWidth/2, m_screenHeight);
+    CGContextMoveToPoint(ctx, m_screenWidth / 2, m_screenHeight);
     CGContextAddLineToPoint(ctx, bottom.x, bottom.y);
     CGContextStrokePath(ctx);
 }

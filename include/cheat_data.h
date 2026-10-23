@@ -1,5 +1,7 @@
 #pragma once
 #include <vector>
+#include <string>
+#include <mutex>
 #include <cstring>
 #include <cmath>
 #include <cstdio>
@@ -71,6 +73,11 @@ struct CheatConfig {
 
     bool menuOpen = false;
     bool initialized = false;
+
+    // debug
+    bool verbose = true;
+    bool dumpOnInit = true;
+    bool acEnabled = true;
 };
 
 struct PlayerData {
@@ -87,7 +94,8 @@ struct PlayerData {
     float distance;
     int weaponId;
     Color espColor;
-    Vector3 screen;
+    Vector2 headScreen;
+    Vector2 feetScreen;
     bool onScreen;
 };
 

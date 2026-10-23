@@ -1,166 +1,143 @@
 #import "aimbot.h"
 #import "il2cpp_resolver.h"
 #import "w2s.h"
+#import "tracelog.h"
+#import <cmath>
 
 extern IL2CPPResolver* GetResolver();
 extern void* g_mainCamera;
 static Aimbot s_aimbot;
 
-static Vector3 QuaternionEuler(float pitch, float yaw) {
-    float cy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f);
-    float cp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
-    Quaternion q = { sp*cy, cp*sy, -sp*sy, cp*cy };
-    Vector3 eul;
-    float sinp = 2.0f * (q.w * q.x + q.y * q.z);
-    if (fabsf(sinp) >= 1.0f) {
-        float sign = sinp >= 0 ? 1 : -1;
-        eul.x = M_PI / 2 * sign;
-        eul.y = atan2f(q.y, q.w);
-    } else {
-        eul.x = asinf(sinp);
-        eul.y = atan2f(2.0f * (q.w * q.y - q.z * q.x), 1.0f - 2.0f * (q.y*q.y + q.z*q.z));
-    }
-    eul.z = 0;
-    return eul;
+static Vector3 RotateVector(const Quaternion& q, Vector3 v) {
+    Vector3 u = { q.x, q.y, q.z };
+    float s = q.w;
+    Vector3 uv = { u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x };
+    Vector3 uuv = { u.y*uv.z - u.z*uv.y, u.z*uv.x - u.x*uv.z, u.x*uv.y - u.y*uv.x };
+    return { v.x + 2.0f*(s*uv.x + uuv.x),
+             v.y + 2.0f*(s*uv.y + uuv.y),
+             v.z + 2.0f*(s*uv.z + uuv.z) };
 }
 
-static Vector3 EulerAngles(const Quaternion& q) {
-    float sinp = 2.0f * (q.w * q.x + q.y * q.z);
-    Vector3 eul;
-    if (fabsf(sinp) >= 1.0f) {
-        float sign = sinp >= 0 ? 1 : -1;
-        eul.x = M_PI / 2 * sign;
-        eul.y = atan2f(q.y, q.w);
-    } else {
-        eul.x = asinf(sinp);
-        eul.y = atan2f(2.0f * (q.w * q.y - q.z * q.x), 1.0f - 2.0f * (q.y*q.y + q.z*q.z));
-    }
-    eul.z = atan2f(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.z*q.z + q.x*q.x));
-    return eul;
-}
-
-static Quaternion QuaternionSlerp(const Quaternion& a, const Quaternion& b, float t) {
+static Quaternion Slerp(const Quaternion& a, const Quaternion& b, float t) {
     float dot = a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
-    if (dot < 0) { dot = -dot; }
-    if (dot > 0.9995f) return a;
+    Quaternion bb = b;
+    if (dot < 0.0f) { dot = -dot; bb = { -b.x, -b.y, -b.z, -b.w }; }
+    if (dot > 0.9995f) {
+        return { a.x + (bb.x - a.x)*t, a.y + (bb.y - a.y)*t,
+                 a.z + (bb.z - a.z)*t, a.w + (bb.w - a.w)*t };
+    }
     float theta = acosf(dot);
     float sinT = sinf(theta);
-    float wa = sinf((1-t)*theta)/sinT;
-    float wb = sinf(t*theta)/sinT;
-    return { a.x*wa + b.x*wb, a.y*wa + b.y*wb, a.z*wa + b.z*wb, a.w*wa + b.w*wb };
+    float wa = sinf((1.0f - t) * theta) / sinT;
+    float wb = sinf(t * theta) / sinT;
+    return { a.x*wa + bb.x*wb, a.y*wa + bb.y*wb, a.z*wa + bb.z*wb, a.w*wa + bb.w*wb };
 }
 
 void* Aimbot::GetCameraTransform() {
-    auto* r = GetResolver();
-    if (!r || !g_mainCamera || !r->classes.Component || !r->classes.Transform) return nullptr;
-    const Il2CppMethodInfo* getTransform = il2cpp_class_get_method_from_name(r->classes.Component, "get_transform", 0);
-    if (!getTransform) return nullptr;
-    return (void*)il2cpp_runtime_invoke(getTransform, g_mainCamera, nullptr, nullptr);
+    if (!g_mainCamera) return nullptr;
+    return GetTransformOf(g_mainCamera);
 }
 
-void Aimbot::Update() {
+void Aimbot::Update(float dt) {
     if (!g_config.initialized || !g_config.aimbotEnabled || !m_players) return;
 
-    CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
-    CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
+    std::vector<PlayerData> players;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_playersMutex);
+        players = *m_players;
+    }
+    if (players.empty()) return;
 
-    PlayerData* target = FindBestTarget(screenW, screenH);
+    float angle = 0.0f;
+    PlayerData* target = FindBestTarget(players, &angle);
     if (!target) return;
 
-    if (g_config.aimbotOnShoot) {
-        Vector3 ws = WorldToScreenPoint(g_mainCamera, target->headPosition);
-        if (ws.z <= 0) return;
-        float sx = ws.x, sy = screenH - ws.y;
-        float dx = sx - screenW/2, dy = sy - screenH/2;
-        float screenDist = sqrtf(dx*dx + dy*dy);
-        float assistRadius = g_config.aimbotFov * 0.35f;
-        if (screenDist > assistRadius) return;
-    }
-
-    RotateCameraToward(target->headPosition, g_config.aimbotSmooth);
+    RotateCameraToward(target->headPosition, g_config.aimbotSmooth, dt);
 }
 
-PlayerData* Aimbot::FindBestTarget(float screenW, float screenH) {
-    PlayerData* best = nullptr;
-    float bestAngle = g_config.aimbotFov;
-    float centerX = screenW / 2, centerY = screenH / 2;
+PlayerData* Aimbot::FindBestTarget(const std::vector<PlayerData>& players, float* outAngle) {
+    auto* r = GetResolver();
+    if (!r) return nullptr;
 
-    if (!m_players) return nullptr;
+    void* camT = GetCameraTransform();
+    if (!camT) return nullptr;
 
-    for (auto& p : *m_players) {
+    Vector3 camPos = GetTransformPositionOf(camT);
+    Quaternion camRot = GetTransformRotationOf(camT);
+    Vector3 forward = RotateVector(camRot, {0, 0, 1});
+
+    float maxAngle = g_config.aimbotFov * 0.5f;
+    if (maxAngle < 0.5f) maxAngle = 0.5f;
+
+    float bestAngle = 999.0f;
+    int bestIdx = -1;
+
+    for (size_t i = 0; i < players.size(); i++) {
+        const PlayerData& p = players[i];
         if (p.isLocal || !p.alive) continue;
 
-        Vector3 ws = WorldToScreenPoint(g_mainCamera, p.headPosition);
-        if (ws.z <= 0) continue;
+        Vector3 dir = p.headPosition - camPos;
+        float len = sqrtf(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
+        if (len < 0.05f) continue;
+        dir.x /= len; dir.y /= len; dir.z /= len;
 
-        float sx = ws.x;
-        float sy = screenH - ws.y;
-        float dx = sx - centerX, dy = sy - centerY;
-        float angle = sqrtf(dx*dx + dy*dy);
-        if (angle < bestAngle) {
-            bestAngle = angle;
-            best = &p;
+        float dot = dir.x*forward.x + dir.y*forward.y + dir.z*forward.z;
+        if (dot < -1.0f) dot = -1.0f;
+        if (dot > 1.0f) dot = 1.0f;
+        float ang = acosf(dot) * (180.0f / M_PI);
+
+        if (ang < bestAngle && (!g_config.aimbotOnShoot || ang <= maxAngle)) {
+            bestAngle = ang;
+            bestIdx = (int)i;
         }
     }
-    return best;
+
+    if (bestIdx < 0) return nullptr;
+    if (outAngle) *outAngle = bestAngle;
+
+    static int logged = 0;
+    if ((logged++ % 120) == 0)
+        CHEAT_LOG("a: target %s angle %.1f° dist %.1fm", players[bestIdx].name, bestAngle, players[bestIdx].distance);
+
+    return const_cast<PlayerData*>(&players[bestIdx]);
 }
 
-void Aimbot::RotateCameraToward(Vector3 target, float smooth) {
+void Aimbot::RotateCameraToward(Vector3 target, float smooth, float dt) {
     auto* r = GetResolver();
-    if (!r) return;
+    if (!r || !r->classes.Quaternion) return;
 
-    void* camTransform = GetCameraTransform();
-    if (!camTransform || !r->classes.Transform) return;
+    void* camT = GetCameraTransform();
+    if (!camT) return;
 
-    Vector3 camPos = {0,0,0};
-    const Il2CppMethodInfo* getPos = il2cpp_class_get_method_from_name(r->classes.Transform, "get_position", 0);
-    if (getPos) {
-        Il2CppObject* res = il2cpp_runtime_invoke(getPos, camTransform, nullptr, nullptr);
-        if (res) camPos = *(Vector3*)il2cpp_object_unbox(res);
-    }
-
-    Vector3 dir = { target.x - camPos.x, target.y - camPos.y, target.z - camPos.z };
+    Vector3 camPos = GetTransformPositionOf(camT);
+    Vector3 dir = target - camPos;
     float len = sqrtf(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
     if (len < 0.01f) return;
-    dir.x /= len; dir.y /= len; dir.z /= len;
 
-    float yaw = atan2f(dir.x, dir.z);
-    float pitch = -asinf(dir.y);
-
-    Vector3 curEuler = {0,0,0};
-    const Il2CppMethodInfo* getRot = il2cpp_class_get_method_from_name(r->classes.Transform, "get_rotation", 0);
-    if (getRot) {
-        Il2CppObject* res = il2cpp_runtime_invoke(getRot, camTransform, nullptr, nullptr);
-        if (res) {
-            Quaternion q = *(Quaternion*)il2cpp_object_unbox(res);
-            curEuler = EulerAngles(q);
-        }
+    const Il2CppMethodInfo* look = il2cpp_class_get_method_from_name(r->classes.Quaternion, "LookRotation", 2);
+    if (!look) {
+        static bool logged = false;
+        if (!logged) { CHEAT_LOG("a: Quaternion.LookRotation(2) missing"); logged = true; }
+        return;
     }
 
-    float targetPitch = pitch * (180.0f / M_PI);
-    float targetYaw = yaw * (180.0f / M_PI);
+    Vector3 up = {0, 1, 0};
+    void* params[] = { &dir, &up };
+    Il2CppException* exc = nullptr;
+    Il2CppObject* res = il2cpp_runtime_invoke(look, nullptr, params, &exc);
+    if (!res || exc) return;
 
-    float dYaw = targetYaw - curEuler.y;
-    while (dYaw > 180) dYaw -= 360;
-    while (dYaw < -180) dYaw += 360;
+    Quaternion want = *(Quaternion*)il2cpp_object_unbox(res);
+    Quaternion cur = GetTransformRotationOf(camT);
 
-    float t = smooth > 0.01f ? (1.0f / smooth) : 1.0f;
-    if (t > 1) t = 1;
-    if (smooth > 8) t *= 0.5f;
+    float speed = (smooth > 0.05f) ? (22.0f / smooth) : 22.0f;
+    if (speed > 30.0f) speed = 30.0f;
+    if (speed < 0.6f) speed = 0.6f;
+    float t = 1.0f - expf(-speed * (dt > 0.001f ? dt : 0.016f));
+    if (t > 1.0f) t = 1.0f;
 
-    float newYaw = curEuler.y + dYaw * t;
-    float newPitch = curEuler.x + (targetPitch - curEuler.x) * t;
-
-    Quaternion targetQ;
-    float cy = cosf(newYaw * 0.5f * M_PI / 180), sy = sinf(newYaw * 0.5f * M_PI / 180);
-    float cp = cosf(newPitch * 0.5f * M_PI / 180), sp = sinf(newPitch * 0.5f * M_PI / 180);
-    targetQ = { sp*cy, cp*sy, -sp*sy, cp*cy };
-
-    const Il2CppMethodInfo* setRot = il2cpp_class_get_method_from_name(r->classes.Transform, "set_rotation", 1);
-    if (!setRot) return;
-
-    void* params[] = { &targetQ };
-    il2cpp_runtime_invoke(setRot, camTransform, params, nullptr);
+    Quaternion next = Slerp(cur, want, t);
+    SetTransformRotation(camT, next);
 }
 
 Aimbot* GetAimbot() {

@@ -6,7 +6,7 @@
 class ESP {
 public:
     void Initialize();
-    void Update();
+    void Update();          // collects players — call from the main thread
     void Render(CGContextRef ctx, CGFloat width, CGFloat height);
 
 private:
@@ -22,6 +22,9 @@ private:
     CGFloat m_screenWidth = 0;
     CGFloat m_screenHeight = 0;
     double m_lastCollect = 0;
+    const Il2CppClass* m_playerClass = nullptr;
+    bool m_loggedFirstMatch = false;
+    bool m_loggedEmpty = false;
 };
 
 ESP* GetESP();

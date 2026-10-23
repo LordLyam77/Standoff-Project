@@ -4,12 +4,12 @@
 
 class Aimbot {
 public:
-    void Update();
+    void Update(float dt);
     void SetPlayerList(std::vector<PlayerData>* players) { m_players = players; }
 
 private:
-    PlayerData* FindBestTarget(float screenW, float screenH);
-    void RotateCameraToward(Vector3 target, float smooth);
+    PlayerData* FindBestTarget(const std::vector<PlayerData>& players, float* outAngle);
+    void RotateCameraToward(Vector3 target, float smooth, float dt);
     void* GetCameraTransform();
 
     std::vector<PlayerData>* m_players = nullptr;

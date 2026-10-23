@@ -14,18 +14,27 @@ typedef struct Il2CppThread Il2CppThread;
 typedef struct Il2CppException Il2CppException;
 typedef struct Il2CppArray Il2CppArray;
 
+// IL2CPP strings are UTF-16, not char*. Getting this wrong is why names showed up blank.
+typedef uint16_t Il2CppChar;
+
 #pragma GCC visibility push(hidden)
 extern "C" {
     extern const Il2CppDomain* (*il2cpp_domain_get)();
     extern const Il2CppAssembly** (*il2cpp_domain_get_assemblies)(const Il2CppDomain* domain, size_t* size);
     extern const Il2CppImage* (*il2cpp_assembly_get_image)(const Il2CppAssembly* assembly);
     extern const char* (*il2cpp_image_get_name)(const Il2CppImage* image);
+    extern size_t (*il2cpp_image_get_class_count)(const Il2CppImage* image);
+    extern const Il2CppClass* (*il2cpp_image_get_class)(const Il2CppImage* image, int index);
 
     extern const Il2CppClass* (*il2cpp_class_from_name)(const Il2CppImage* image, const char* ns, const char* name);
+    extern const Il2CppClass* (*il2cpp_class_get_parent)(const Il2CppClass* klass);
     extern const Il2CppFieldInfo* (*il2cpp_class_get_field_from_name)(const Il2CppClass* klass, const char* name);
     extern const Il2CppMethodInfo* (*il2cpp_class_get_method_from_name)(const Il2CppClass* klass, const char* name, int paramCount);
     extern const char* (*il2cpp_class_get_name)(const Il2CppClass* klass);
     extern const char* (*il2cpp_class_get_namespace)(const Il2CppClass* klass);
+
+    extern const Il2CppFieldInfo* (*il2cpp_class_get_fields)(const Il2CppClass* klass, void** iter);
+    extern const Il2CppMethodInfo* (*il2cpp_class_get_methods)(const Il2CppClass* klass, void** iter);
 
     extern size_t (*il2cpp_field_get_offset)(const Il2CppFieldInfo* field);
     extern const char* (*il2cpp_field_get_name)(const Il2CppFieldInfo* field);
@@ -36,11 +45,11 @@ extern "C" {
     extern void (*il2cpp_field_static_set_value)(const Il2CppFieldInfo* field, const void* value);
 
     extern Il2CppObject* (*il2cpp_runtime_invoke)(const Il2CppMethodInfo* method, void* obj, void** params, Il2CppException** exc);
-    extern Il2CppObject* (*il2cpp_runtime_invoke_varargs)(const Il2CppMethodInfo* method, void* obj, void** params, Il2CppException** exc);
     extern const char* (*il2cpp_method_get_name)(const Il2CppMethodInfo* method);
+    extern int (*il2cpp_method_get_param_count)(const Il2CppMethodInfo* method);
 
     extern Il2CppObject* (*il2cpp_object_new)(const Il2CppClass* klass);
-    extern Il2CppObject* (*il2cpp_object_unbox)(Il2CppObject* obj);
+    extern void* (*il2cpp_object_unbox)(Il2CppObject* obj);
     extern Il2CppClass* (*il2cpp_object_get_class)(Il2CppObject* obj);
 
     extern Il2CppThread* (*il2cpp_thread_attach)(const Il2CppDomain* domain);
@@ -53,17 +62,23 @@ extern "C" {
     extern Il2CppObject* (*il2cpp_type_get_object)(const Il2CppType* type);
 
     extern Il2CppObject* (*il2cpp_string_new)(const char* str);
-    extern size_t (*il2cpp_string_length)(Il2CppObject* str);
-    extern const char* (*il2cpp_string_chars)(Il2CppObject* str);
+    extern int32_t (*il2cpp_string_length)(Il2CppObject* str);
+    extern const Il2CppChar* (*il2cpp_string_chars)(Il2CppObject* str);
 
     extern Il2CppArray* (*il2cpp_array_new)(const Il2CppClass* klass, uintptr_t len);
     extern Il2CppArray* (*il2cpp_array_new_specific)(const Il2CppClass* klass, uintptr_t len);
     extern Il2CppClass* (*il2cpp_array_class_get)(const Il2CppClass* klass, uint32_t rank);
-    extern void* (*il2cpp_array_get)(const Il2CppArray* arr, uintptr_t index);
+    extern void* (*il2cpp_array_addr_with_size)(const Il2CppArray* arr, int32_t size, uintptr_t index);
     extern uintptr_t (*il2cpp_array_length)(const Il2CppArray* arr);
-
-    typedef void* Il2CppIterator;
-    extern const Il2CppMethodInfo* (*il2cpp_class_get_methods)(const Il2CppClass* klass, Il2CppIterator* iter);
-    extern int (*il2cpp_class_get_method_count)(const Il2CppClass* klass);
 }
 #pragma GCC visibility pop
+
+// il2cpp_array_get does not exist in the public IL2CPP API.
+// Standoff-Project used to dlsym it, get NULL, and call it. This is the correct accessor.
+static inline void* il2cpp_array_object_at(const Il2CppArray* arr, uintptr_t index) {
+    if (!arr) return nullptr;
+    if (il2cpp_array_addr_with_size)
+        return *(void**)il2cpp_array_addr_with_size(arr, (int32_t)sizeof(void*), index);
+    // arm64 Il2CppArray layout: [klass][monitor][bounds][max_length][vector...]
+    return *(void**)((const char*)arr + 0x20 + index * sizeof(void*));
+}

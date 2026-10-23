@@ -1,10 +1,14 @@
 #pragma once
 #import "cheat_data.h"
-#import "il2cpp_resolver.h"
 
 class RecoilControl {
 public:
     void Update();
+
+private:
+    bool m_patched = false;
+    bool m_dumped = false;
+    double m_last = 0;
 };
 
 RecoilControl* GetRecoilControl();

@@ -2,6 +2,8 @@
 #import "cheat_data.h"
 #import "tracelog.h"
 
+extern void CheatDumpNow();
+
 UIWindow* g_menuWindow = nil;
 CheatMenuController* g_menuController = nil;
 
@@ -16,6 +18,7 @@ static const CGFloat kPanelW = 400;
 @interface CheatMenuController () <UIGestureRecognizerDelegate>
 @property (nonatomic, assign) CGPoint anchor;
 @property (nonatomic, assign) CGFloat panelHeight;
+- (void)dumpTapped;
 @end
 
 @implementation CheatMenuController
@@ -262,6 +265,16 @@ static const CGFloat kPanelW = 400;
 
     y += 2;
 
+    UIButton* dumpBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    dumpBtn.frame = CGRectMake(10, y, kPanelW - 20, 24);
+    dumpBtn.backgroundColor = ThemeColor(40, 90, 140);
+    dumpBtn.layer.cornerRadius = 6;
+    [dumpBtn setTitle:@"Dump classes to log" forState:UIControlStateNormal];
+    dumpBtn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
+    [dumpBtn addTarget:self action:@selector(dumpTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.menuPanel addSubview:dumpBtn];
+    y += 30;
+
     UIButton* closeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     closeBtn.frame = CGRectMake(10, y, kPanelW - 20, 26);
     closeBtn.backgroundColor = ThemeColor(200, 50, 50);
@@ -277,6 +290,11 @@ static const CGFloat kPanelW = 400;
 }
 
 #pragma mark - Control events
+
+- (void)dumpTapped {
+    CheatDumpNow();
+    CHEAT_LOG("m: manual dump requested");
+}
 
 - (void)switchChanged:(UISwitch*)sw {
     switch (sw.tag) {
